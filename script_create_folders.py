@@ -1,29 +1,52 @@
 import os
 import pandas as pd
+import unicodedata
+import re
 
-arquivo_abas = r'C:\Users\Rubens\Documents\Tremed\Planilhas Tremed\Master_Fornecedor.xlsx'
-arquivo_coluna = r'C:\Users\Rubens\Documents\Tremed\Planilhas Tremed\Tabela_Master.xlsx'
+def remove_acentos(txt):
+    nfkd = unicodedata.normalize('NFKD', txt)
+    return "".join([c for c in nfkd if not unicodedata.combining(c)])
 
-saida_excel = r'C:\Users\Rubens\Downloads\fornecedores_unificados.xlsx'
+caminho_excel = r'C:\Users\Rubens\Documents\Tremed\Planilhas Tremed\Tabela_Master.xlsx'
 
-sheets = pd.ExcelFile(arquivo_abas).sheet_names
-fornecedores_abas = [nome.strip() for nome in sheets if nome.strip() != '']  # remove espaços e vazios
+pasta_destino = r'C:\Users\Rubens\Downloads\Fornecedores'
 
-df = pd.read_excel(arquivo_coluna, sheet_name='FORNECEDORES')
+aba = 'FORNECEDORES'
+coluna_codigo = 'CÓD'
+coluna_nome_fornecedor = 'NOME DO FORNECEDOR'
+
+meses = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 
+         'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO']
+
+df = pd.read_excel(caminho_excel, sheet_name=aba)
+
 df.columns = df.columns.str.strip()
 
-if 'NOME DO FORNECEDOR' in df.columns:
-    fornecedores_coluna = df['NOME DO FORNECEDOR'].dropna().astype(str).str.strip().unique()
-else:
-    print("Coluna 'NOME DO FORNECEDOR' não encontrada na aba 'FORNECEDORES'")
-    fornecedores_coluna = []
+fornecedores = df[[coluna_codigo, coluna_nome_fornecedor]].dropna()
 
-todos_fornecedores = list(fornecedores_abas) + list(fornecedores_coluna)
+for _, row in fornecedores.iterrows():
+    codigo_int = int(row[coluna_codigo])
+    codigo_str = str(codigo_int).zfill(3)
 
-fornecedores_unicos = sorted(set(todos_fornecedores))
+    nome = str(row[coluna_nome_fornecedor])
+    nome_sem_acentos = remove_acentos(nome)
+    nome_formatado = nome_sem_acentos.upper()
+    nome_formatado = re.sub(r'[^A-Z0-9]+', '_', nome_formatado)
+    nome_formatado = nome_formatado.strip('_')
 
-df_saida = pd.DataFrame(fornecedores_unicos, columns=['FORNECEDOR'])
+    caminho_pasta_fornecedor = os.path.join(pasta_destino, f"{codigo_str}_{nome_formatado}")
 
-df_saida.to_excel(saida_excel, index=False)
+    os.makedirs(caminho_pasta_fornecedor, exist_ok=True)
+    print(f"Pasta criada: {caminho_pasta_fornecedor}")
 
-print(f"Arquivo criado com sucesso: {saida_excel}")
+    pasta_produtos = os.path.join(caminho_pasta_fornecedor, 'PRODUTOS')
+    pasta_cotacoes = os.path.join(caminho_pasta_fornecedor, 'COTAÇÕES')
+
+    os.makedirs(pasta_produtos, exist_ok=True)
+    os.makedirs(pasta_cotacoes, exist_ok=True)
+
+    for mes in meses:
+        os.makedirs(os.path.join(pasta_cotacoes, mes), exist_ok=True)
+        print(f"  Subpasta criada: {os.path.join(pasta_cotacoes, mes)}")
+
+print("Processo concluído com sucesso!")
