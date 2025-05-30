@@ -1,54 +1,98 @@
-import requests
 import pandas as pd
+import requests
 from bs4 import BeautifulSoup
+import re
 import time
+from urllib.parse import quote
 
-API_URL = "https://www.receitaws.com.br/v1/cnpj/"
+# Configurações
+CAMINHO_PLANILHA = r"C:\Users\Rubens\Downloads\PreencherCnpjSite.xlsx"
+COLUNA_FORNECEDOR = "FORNECEDOR"  # Nome da coluna com os fornecedores
 
-def consulta_cnpj_receitaws(nome_empresa):
-    # A API do ReceitaWS consulta CNPJ por número, não por nome, então essa função só tenta consultar se tiver o CNPJ
-    # Portanto, não será possível consultar CNPJ apenas pelo nome com essa API gratuita.
-    return None
-
-def busca_site_google(nome_empresa):
-    query = nome_empresa + " site oficial"
-    url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    
+# --- Função para buscar CNPJ (simulada, pois não há API pública para busca por nome) ---
+def buscar_cnpj(nome_empresa):
+    """
+    Simula uma busca por CNPJ com base no nome (limitações: APIs públicas não permitem busca direta por nome).
+    Alternativas: 
+    - Usar serviços pagos como CNPJ WS Pro ou Serpro.
+    - Extrair CNPJ do nome quando disponível (ex: "EMPRESA (12.345.678/0001-90)").
+    """
     try:
+        # Extrai CNPJ se estiver no nome (ex: "EMPRESA (12.345.678/0001-90)")
+        cnpj_no_nome = re.search(r"(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})", nome_empresa)
+        if cnpj_no_nome:
+            return cnpj_no_nome.group(1)
+        
+        # Se não houver CNPJ no nome, retorna "Não encontrado" (sem API válida para busca por nome)
+        return "Não encontrado (busca manual necessária)"
+    
+    except Exception as e:
+        print(f"Erro ao buscar CNPJ para {nome_empresa}: {str(e)}")
+        return "Erro"
+
+# --- Função para buscar site oficial via Google ---
+def buscar_site(nome_empresa):
+    """
+    Faz uma busca no Google pelo "nome_empresa site oficial" e retorna o primeiro link válido.
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        query = f"{nome_empresa} site oficial"
+        url = f"https://www.google.com/search?q={quote(query)}"
+        
         response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, "html.parser")
         
-        for g in soup.find_all('div', class_='tF2Cxc'):
-            link = g.find('a', href=True)
-            if link and 'google' not in link['href']:
-                return link['href']
-    except Exception as e:
-        print(f"Erro buscando site para {nome_empresa}: {e}")
-    return None
-
-def main():
-    caminho_arquivo = r"C:\Users\Rubens\Downloads\PreencherCnpjSite.xlsx"
-    df = pd.read_excel(caminho_arquivo)
+        # Encontra o primeiro link não-Google nos resultados
+        for link in soup.find_all("a", href=True):
+            href = link["href"]
+            if "url?q=" in href and "google.com" not in href:
+                site = href.split("url?q=")[1].split("&")[0]
+                if site.startswith("http"):
+                    return site
+        
+        return "Não encontrado"
     
-    if 'SITE' not in df.columns:
-        df['SITE'] = None
-    if 'CNPJ' not in df.columns:
-        df['CNPJ'] = None
+    except Exception as e:
+        print(f"Erro ao buscar site para {nome_empresa}: {str(e)}")
+        return "Erro"
 
-    for idx, row in df.iterrows():
-        nome = row['FORNECEDOR']
-        print(f"Buscando site para: {nome}")
+# --- Processamento da planilha ---
+def processar_planilha():
+    # Carrega a planilha
+    df = pd.read_excel(CAMINHO_PLANILHA)
+    
+    # Verifica se as colunas CNPJ e SITE existem, se não, cria
+    if "CNPJ" not in df.columns:
+        df["CNPJ"] = ""
+    if "SITE" not in df.columns:
+        df["SITE"] = ""
+    
+    # Itera sobre cada linha para preencher CNPJ e Site
+    for index, row in df.iterrows():
+        fornecedor = row[COLUNA_FORNECEDOR]
         
-        site = busca_site_google(nome)
-        df.at[idx, 'SITE'] = site
+        # Pula se já estiver preenchido
+        if pd.notna(row["CNPJ"]) and row["CNPJ"] != "":
+            continue
         
-        # CNPJ não preenchido por limitação da API gratuita
+        print(f"Processando: {fornecedor}")
         
-        time.sleep(5)  # delay para evitar bloqueios
+        # Busca CNPJ
+        df.at[index, "CNPJ"] = buscar_cnpj(fornecedor)
         
-    df.to_excel(caminho_arquivo.replace(".xlsx", "_preenchido.xlsx"), index=False)
-    print(f"Arquivo salvo em: {caminho_arquivo.replace('.xlsx', '_preenchido.xlsx')}")
+        # Busca Site
+        df.at[index, "SITE"] = buscar_site(fornecedor)
+        
+        # Delay para evitar bloqueio (Google pode bloquear muitas requisições)
+        time.sleep(2)
+    
+    # Salva a planilha atualizada
+    df.to_excel(CAMINHO_PLANILHA, index=False)
+    print("Planilha atualizada com sucesso!")
 
+# Executa o script
 if __name__ == "__main__":
-    main()
+    processar_planilha()
