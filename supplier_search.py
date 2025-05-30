@@ -3,168 +3,157 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import time
-from urllib.parse import quote
 import random
+import os
+from tqdm import tqdm
+from urllib.parse import quote
 
 # =============================================
 # CONFIGURAÇÕES PRINCIPAIS
 # =============================================
-CAMINHO_PLANILHA = r"C:\Users\Rubens\Downloads\PreencherCnpjSite.xlsx"
+ARQUIVO_ORIGINAL = r"C:\Users\Rubens\Downloads\PreencherCnpjSite.xlsx"
+ARQUIVO_TEMP = r"C:\Users\Rubens\Downloads\PreencherCnpjSite_TEMP.xlsx"
 COLUNA_FORNECEDOR = "FORNECEDOR"
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0"
-]
+CHECKPOINT_FREQ = 100  # Salva a cada 100 registros
 
 # =============================================
-# FUNÇÕES DE BUSCA ESPECIALIZADAS (SAÚDE)
+# FUNÇÕES AUXILIARES
 # =============================================
-def limpar_nome_empresa(nome):
-    """Remove termos irrelevantes e padroniza o nome para busca"""
-    termos_remover = [
-        'LTDA', 'EIRELI', 'ME', 'EPP', 'S/A', 'INDÚSTRIA', 'COMÉRCIO',
-        'HOSPITALAR', 'MÉDICO', 'SAÚDE', 'PRODUTOS', 'EQUIPAMENTOS'
+def get_random_agent():
+    agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0"
     ]
-    nome_limpo = re.sub(r'[^\w\s]', '', nome).upper()
-    for termo in termos_remover:
-        nome_limpo = nome_limpo.replace(termo, '')
-    return ' '.join(nome_limpo.split())
+    return random.choice(agents)
 
-def buscar_cnpj_saude(nome_empresa):
-    """Busca otimizada para empresas de saúde"""
+def limpar_nome(nome):
+    remove = ['LTDA', 'EIRELI', 'ME', 'EPP', 'S/A', 'INDÚSTRIA', 'COMÉRCIO', 'HOSPITALAR']
+    nome = re.sub(r'[^\w\s]', '', str(nome)).upper()
+    for termo in remove:
+        nome = nome.replace(termo, '')
+    return ' '.join(nome.split())
+
+# =============================================
+# FUNÇÕES DE BUSCA
+# =============================================
+def buscar_cnpj(nome):
     try:
-        # 1. Extrai CNPJ diretamente do nome quando disponível
-        cnpj_match = re.search(r'(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})', nome_empresa)
-        if cnpj_match:
-            return cnpj_match.group(1)
+        # Extrai CNPJ do nome se existir
+        match = re.search(r'(\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2})', nome)
+        if match:
+            return match.group(1)
         
-        # 2. Consulta simulada à API de saúde (exemplo com CNES)
-        nome_formatado = quote(limpar_nome_empresa(nome_empresa))
-        
-        # Simulação de busca em fonte de dados de saúde
-        # (Implementação real exigiria acesso a API específica)
-        return "CNPJ não encontrado automaticamente. Sugestão:\n" \
-               f"- Consultar manualmente em: https://cnes.datasus.gov.br/pages/estabelecimentos/consulta.jsp\n" \
-               f"- Buscar no Google: {nome_empresa} CNPJ"
+        # Lógica simulada para busca especializada
+        return "Consultar em: https://cnes.datasus.gov.br/"
     
     except Exception as e:
-        print(f"Erro na busca de CNPJ: {str(e)}")
-        return "Erro na consulta"
+        print(f"\nErro CNPJ: {str(e)}")
+        return "Erro"
 
-def buscar_site_saude(nome_empresa):
-    """Busca otimizada para sites de empresas médicas/hospitalares"""
+def buscar_site(nome):
     try:
-        headers = {
-            "User-Agent": random.choice(USER_AGENTS),
-            "Accept-Language": "pt-BR,pt;q=0.9"
-        }
-        
-        # Termos de busca especializados para saúde
-        query = f"{nome_empresa} site oficial equipamentos médicos OR hospitalares OR saúde"
+        headers = {'User-Agent': get_random_agent()}
+        query = f"{nome} site oficial equipamentos médicos OR hospitalares"
         url = f"https://www.google.com/search?q={quote(query)}"
         
         response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Prioriza resultados com domínios relevantes
-        dominios_relevantes = [
-            '.com.br', '.med.br', '.hospitalar', 
-            'saude', 'medicina', 'hospital'
-        ]
-        
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            if '/url?q=' in href and not any(dom in href for dom in ['google.com', 'webcache']):
-                site = href.split('/url?q=')[1].split('&')[0]
-                if any(dom in site.lower() for dom in dominios_relevantes):
-                    return site
-        
-        # Fallback: busca genérica se não encontrar com termos médicos
-        return buscar_site_generico(nome_empresa)
-    
-    except Exception as e:
-        print(f"Erro na busca de site: {str(e)}")
-        return "Erro na consulta"
-
-def buscar_site_generico(nome_empresa):
-    """Busca de fallback para sites não encontrados com termos médicos"""
-    try:
-        headers = {"User-Agent": random.choice(USER_AGENTS)}
-        query = f"{nome_empresa} site oficial"
-        url = f"https://www.google.com/search?q={quote(query)}"
-        
-        response = requests.get(url, headers=headers, timeout=10)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         for link in soup.find_all('a', href=True):
             if '/url?q=' in link['href']:
                 site = link['href'].split('/url?q=')[1].split('&')[0]
-                if site.startswith('http'):
+                if any(dom in site for dom in ['.com.br', '.med.br', 'hospital']):
                     return site
+        
+        return buscar_site_generico(nome)
+    
+    except Exception as e:
+        print(f"\nErro site: {str(e)}")
+        return "Erro"
+
+def buscar_site_generico(nome):
+    try:
+        headers = {'User-Agent': get_random_agent()}
+        url = f"https://www.google.com/search?q={quote(nome + ' site oficial')}"
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        for link in soup.find_all('a', href=True):
+            if '/url?q=' in link['href']:
+                return link['href'].split('/url?q=')[1].split('&')[0]
         
         return "Não encontrado"
     except:
-        return "Erro na busca"
+        return "Erro"
 
 # =============================================
-# PROCESSAMENTO DA PLANILHA
+# CONTROLE DE PROCESSAMENTO
 # =============================================
-def processar_planilha():
-    try:
-        # Carrega os dados
-        df = pd.read_excel(CAMINHO_PLANILHA)
-        
-        # Verifica e cria colunas se necessário
-        for col in ['CNPJ', 'SITE']:
-            if col not in df.columns:
-                df[col] = ""
-        
-        # Processa cada registro
-        total = len(df)
-        for index, row in df.iterrows():
-            fornecedor = str(row[COLUNA_FORNECEDOR]).strip()
-            
-            # Pula se já estiver preenchido
-            if pd.notna(row['CNPJ']) and str(row['CNPJ']) not in ['', 'Não encontrado']:
-                continue
-            
-            print(f"\nProcessando {index+1}/{total}: {fornecedor}")
-            
-            # Busca CNPJ com foco em saúde
-            df.at[index, 'CNPJ'] = buscar_cnpj_saude(fornecedor)
-            
-            # Busca site especializado
-            df.at[index, 'SITE'] = buscar_site_saude(fornecedor)
-            
-            # Intervalo aleatório para evitar bloqueio
-            time.sleep(random.uniform(2, 5))
-            
-            # Salvamento incremental a cada 10 registros
-            if (index + 1) % 10 == 0:
-                df.to_excel(CAMINHO_PLANILHA, index=False)
-                print(f"✓ Salvamento temporário realizado (linha {index+1})")
-        
-        # Salva o resultado final
-        df.to_excel(CAMINHO_PLANILHA, index=False)
-        print("\n✅ Planilha atualizada com sucesso!")
-        
-    except Exception as e:
-        print(f"\n❌ Erro crítico: {str(e)}")
-        print("Verifique o arquivo e tente novamente.")
+def carregar_progresso():
+    """Verifica se há um arquivo temporário para continuar"""
+    if os.path.exists(ARQUIVO_TEMP):
+        df = pd.read_excel(ARQUIVO_TEMP)
+        inicio = df[df['CNPJ'].isna() | (df['CNPJ'] == '')].index[0]
+        print(f"\n♻ Retomando processamento da linha {inicio + 1}...")
+        return df, inicio
+    else:
+        df = pd.read_excel(ARQUIVO_ORIGINAL)
+        df['CNPJ'] = df['CNPJ'].fillna('')
+        df['SITE'] = df['SITE'].fillna('')
+        print("\n✅ Iniciando novo processamento...")
+        return df, 0
+
+def salvar_checkpoint(df, index):
+    """Salva progresso atual"""
+    df.to_excel(ARQUIVO_TEMP, index=False)
+    print(f"\n💾 Checkpoint salvo (linha {index + 1})")
+
+def finalizar_processo(df):
+    """Finaliza e limpa arquivos temporários"""
+    df.to_excel(ARQUIVO_ORIGINAL, index=False)
+    if os.path.exists(ARQUIVO_TEMP):
+        os.remove(ARQUIVO_TEMP)
+    print("\n✅ Processo concluído com sucesso!")
 
 # =============================================
 # EXECUÇÃO PRINCIPAL
 # =============================================
-if __name__ == "__main__":
+def main():
     print("""
-    ====================================
-    BUSCADOR DE CNPJ E SITES - SAÚDE
-    ====================================
+    ================================
+    BUSCADOR CNPJ/SITES - RAMO MÉDICO
+    ================================
     """)
     
-    processar_planilha()
+    df, inicio = carregar_progresso()
+    total = len(df)
     
-    print("\nOperação concluída. Verifique o arquivo:", CAMINHO_PLANILHA)
+    try:
+        with tqdm(total=total, initial=inicio, desc="Progresso") as pbar:
+            for index in range(inicio, total):
+                fornecedor = str(df.at[index, COLUNA_FORNECEDOR]).strip()
+                
+                if pd.isna(df.at[index, 'CNPJ']) or df.at[index, 'CNPJ'] == '':
+                    df.at[index, 'CNPJ'] = buscar_cnpj(fornecedor)
+                    df.at[index, 'SITE'] = buscar_site(fornecedor)
+                    time.sleep(random.uniform(1, 3))
+                
+                # Atualiza barra de progresso
+                pbar.update(1)
+                
+                # Checkpoint periódico
+                if (index + 1) % CHECKPOINT_FREQ == 0:
+                    salvar_checkpoint(df, index)
+        
+        finalizar_processo(df)
+    
+    except Exception as e:
+        print(f"\n❌ Erro interrompeu o processamento: {str(e)}")
+        print(f"Última linha processada: {index + 1}")
+        if 'df' in locals():
+            salvar_checkpoint(df, index)
+        print("\n⚠ Execute novamente para continuar de onde parou")
+
+if __name__ == "__main__":
+    main()
